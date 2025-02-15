@@ -32,10 +32,15 @@ def solve_puzzle(initial):
 def read_input():
     with open("n-puzzle.txt", "r") as file:
         data = file.read().strip().split("\n")
-    return tuple(map(int, " ".join(data).split()))
+        return tuple(map(int, " ".join(data).split()))
 
 if __name__ == "__main__":
+    test = 0
     initial = read_input()
     solution = solve_puzzle(initial)
     print(initial, "initial state")
-    print(solution if isinstance(solution, str) else "\n".join(map(str, solution)))
+    if isinstance(solution, str):
+        print(solution)
+    else:
+        print("\n".join(map(str, solution)))
+        print("Steps it took: ", len(solution))
