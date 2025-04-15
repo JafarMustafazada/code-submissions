@@ -3,6 +3,7 @@ def parse_input(input_text : str):
 	# sections: # Landscape, # Tiles, # Targets.
 	sections = input_text.split("# ") 
 	landscape_data = sections[1].split("\n")[1:]
+	print(landscape_data)
 	size = len(sections[1].strip().split("\n")) - 1
 	print(size,"x",size, sep="")
 	landscape = []
@@ -11,7 +12,8 @@ def parse_input(input_text : str):
 		row = landscape_data[j]
 		landscape_row = []
 		for i in range(size):
-			if row[i * 2] == " ": landscape_row.append(0)
+			if i * 2 > len(row): landscape_row.append(0)
+			elif row[i * 2] == " ": landscape_row.append(0)
 			else: landscape_row.append(int(row[i * 2]))
 		landscape.append(landscape_row)
 	tiles_line = sections[2].strip().split("\n")[1].strip().strip("{}")
@@ -161,4 +163,4 @@ if __name__ == "__main__":
 	if solution is None: print("No solution found")
 	else:
 		for idx in sorted(solution):
-			print(f"{idx} {solution[idx][0]}")
+			print(f"{idx} {solution[idx]}")
