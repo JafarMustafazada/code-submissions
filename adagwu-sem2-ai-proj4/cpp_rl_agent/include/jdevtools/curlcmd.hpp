@@ -1,21 +1,21 @@
 
-#include <stdexcept>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
 // #include <iostream>
 
 namespace curlcmd {
-	#if defined(_WIN32)
-	#define popen _popen
-	#define pclose _pclose
-	#endif
-	
-	std::string exec(const char* cmd) {
+#if defined(_WIN32)
+#define popen _popen
+#define pclose _pclose
+#endif
+
+	std::string exec(const char *cmd) {
 		char buffer[128];
 		std::string result = "";
-		FILE* pipe = popen(cmd, "r");
+		FILE *pipe = popen(cmd, "r");
 		if (!pipe) throw std::runtime_error("popen() failed!");
 		try {
 			while (fgets(buffer, sizeof buffer, pipe) != NULL) {
@@ -51,5 +51,5 @@ namespace curlcmd {
 		}
 		// std::cout << command << '\n';
 		return exec(command.data());
-	} 
+	}
 }

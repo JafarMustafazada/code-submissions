@@ -1,7 +1,7 @@
 import requests
 import json
 
-api_key = "key"
+api_key = ""
 user_id = "3671"
 teamId1 = "1447"
 
@@ -19,7 +19,9 @@ def sends(payload, is_get = False, headers1 = headers01):
 		method = "GET"
 		url += "?" + payload
 		payload = {}
-	response = requests.request(method, url, headers=headers1, data=payload)
+		
+	if (is_get): response = requests.request(method, url, headers=headers1, data=payload)
+	else: response = requests.post(url=url, headers=headers1, data=payload)
 	if response.status_code == 200: return response
 	else: print(f"Error: {response.status_code} - {response.text}")
 
@@ -61,6 +63,7 @@ def get_s_board(gameid):
 def get_m_board(gameid):
 	payload1 = f"type=boardMap&gameId={gameid}"
 	data1 = json.loads(sends(payload1, True).text)
+	print(data1)
 	mboard = json.loads(data1["output"])
 	for key, value in mboard.items():
 		print(f"{key}: {value}")
@@ -93,13 +96,13 @@ def get_m_board(gameid):
 		
 
 ## main ##
-print("GG")
+print()
 # gameid = 5191
 # gameid = 5186
 # print(create_game("1447").text)
-gameid = 5207
-# get_s_board(gameid)
-# print(make_move(gameid, 3, 3).text)
+# gameid = 5207
+gameid = 5466
+# print(make_move(gameid, 4, 3).text)
 get_s_board(gameid)
 
 # get_games()
