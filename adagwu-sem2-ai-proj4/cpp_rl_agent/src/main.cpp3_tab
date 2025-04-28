@@ -1,0 +1,472 @@
+#include "jdevtools/curlcmd.hpp"
+#include <nlohmann/json.hpp>
+
+#include <fstream>
+#include <random>
+#include <thread>
+#include <utility>
+#include <vector>
+
+using json = nlohmann::json;
+using namespace curlcmd;
+using namespace std;
+
+// –– API constants ––
+static constexpr int TEAM_ID = 1447;
+static constexpr int START_WORLD = 1;
+static constexpr int NUM_WORLDS = 11;
+static constexpr int VISITS_PER_WORLD = 5;
+static constexpr int GRID_SIDE = 40;
+static constexpr int S = GRID_SIDE * GRID_SIDE; // 1600 states
+
+static constexpr int MAX_EPISODES = 500;       // fail-safe maximum
+static constexpr int STEPS_PER_EPISODE = 1600;  // steps per learning episode
+static constexpr int CHECK_INTERVAL = 50;       // check convergence every 50 episodes
+static constexpr double CONVERGENCE_EPS = 1e-3; // Q‐value change threshold
+
+// –– Configuration for learning ––
+struct RLConfig {
+	double alpha0 = 0.5;       // initial learning rate
+	double alphaDecay = 1e-4;  // decay per step
+	double eps0 = 1.0;         // initial epsilon
+	double epsMin = 0.05;      // minimum epsilon
+	double epsDecay = 0.9995;  // per-step multiplicative decay
+	bool useBoltzmann = false; // if true, use softmax instead
+	double tau0 = 1.0;         // initial temperature
+	double tauDecay = 1e-4;    // temperature decay per step
+	bool featureQA = false;    // if true, use linear function approx
+	double gamma = 0.99;       // discount factor
+};
+
+// –– Convert state index to (r,c) and back ––
+inline int idx(int r, int c, int N) { return r * N + c; }
+inline pair<int, int> coords(int s, int N) { return {s / N, s % N}; }
+
+// –– Base interface for a Q-learner ––
+struct QBase {
+	virtual int choose(int s) = 0;
+	virtual void update(int s, int a, int sp, double r) = 0;
+	virtual void decay() = 0;
+	virtual void save(const string &filename) = 0;
+	virtual void load(const string &filename) = 0;
+	virtual ~QBase() = default;
+};
+
+// –– Tabular Q-Learner ––
+struct QTable : QBase {
+	int S, A = 4;
+	RLConfig C;
+	vector<vector<double>> Q;
+	double alpha, eps, tau;
+	mt19937 gen{random_device{}()};
+	uniform_real_distribution<> ur{0, 1};
+
+	QTable(int S_, RLConfig cfg)
+		: S(S_), C(cfg),
+		Q(S_, vector<double>(A, 0.0)),
+		alpha(cfg.alpha0), eps(cfg.eps0), tau(cfg.tau0) {
+		// optimistic init
+		for (auto &row : Q)
+			for (auto &v : row)
+				v = 1.0;
+	}
+
+	int choose(int s) override {
+		if (!C.useBoltzmann && ur(gen) < eps) {
+			return uniform_int_distribution<>(0, A - 1)(gen);
+		}
+		if (C.useBoltzmann) {
+			// softmax over Q[s][a]/tau
+			vector<double> ex(A);
+			double sum = 0;
+			for (int a = 0; a < A; a++) {
+				ex[a] = exp(Q[s][a] / max(tau, 1e-6));
+				sum += ex[a];
+			}
+			double r = ur(gen) * sum;
+			for (int a = 0; a < A; a++) {
+				if ((r -= ex[a]) <= 0) return a;
+			}
+			return A - 1;
+		} else {
+			// greedy
+			auto &row = Q[s];
+			return max_element(row.begin(), row.end()) - row.begin();
+		}
+	}
+
+	void update(int s, int a, int sp, double r) override {
+		double best = *max_element(Q[sp].begin(), Q[sp].end());
+		Q[s][a] += alpha * (r + C.gamma * best - Q[s][a]);
+	}
+
+	void decay() override {
+		alpha = max(0.01, alpha * (1 - C.alphaDecay));
+		eps = max(C.epsMin, eps * C.epsDecay);
+		tau = max(0.01, tau * (1 - C.tauDecay));
+	}
+
+	void save(const string &fn) override {
+		json J;
+		J["S"] = S;
+		J["A"] = A;
+		J["Q"] = Q;
+		ofstream out(fn);
+		out << J.dump(2);
+	}
+
+	void load(const string &fn) override {
+		ifstream in(fn);
+		if (!in) return;
+		json J;
+		in >> J;
+		Q = J["Q"].get<vector<vector<double>>>();
+	}
+};
+
+// –– Feature-based linear Q-Learner ––
+struct QFeat : QBase {
+	int S, A = 4, D = 3; // D = #features (bias + r/n + c/m)
+	RLConfig C;
+	vector<vector<double>> w; // w[a][d]
+	double alpha, eps, tau;
+	int N; // grid width
+	mt19937 gen{random_device{}()};
+	uniform_real_distribution<> ur{0, 1};
+
+	QFeat(int S_, int N_, RLConfig cfg)
+		: S(S_), C(cfg), w(A, vector<double>(D, 0.0)),
+		alpha(cfg.alpha0), eps(cfg.eps0), tau(cfg.tau0), N(N_) {
+		// small random init
+		normal_distribution<> nd(0, 0.1);
+		for (auto &wa : w)
+			for (auto &vd : wa)
+				vd = nd(gen);
+	}
+
+	// φ(s): [1, r/(N-1), c/(N-1)]
+	vector<double> phi(int s) {
+		auto [r, c] = coords(s, N);
+		return {1.0, double(r) / (N - 1), double(c) / (N - 1)};
+	}
+
+	double Qval(int s, int a) {
+		auto f = phi(s);
+		double sum = 0;
+		for (int d = 0; d < D; d++)
+			sum += w[a][d] * f[d];
+		return sum;
+	}
+
+	int choose(int s) override {
+		if (!C.useBoltzmann && ur(gen) < eps) return uniform_int_distribution<>(0, A - 1)(gen);
+		if (C.useBoltzmann) {
+			vector<double> ex(A);
+			double sum = 0;
+			for (int a = 0; a < A; a++) {
+				ex[a] = exp(Qval(s, a) / max(tau, 1e-6));
+				sum += ex[a];
+			}
+			double r = ur(gen) * sum;
+			for (int a = 0; a < A; a++) {
+				if ((r -= ex[a]) <= 0) return a;
+			}
+			return A - 1;
+		} else {
+			int besta = 0;
+			double best = Qval(s, 0);
+			for (int a = 1; a < A; a++) {
+				double q = Qval(s, a);
+				if (q > best) {
+					best = q;
+					besta = a;
+				}
+			}
+			return besta;
+		}
+	}
+
+	void update(int s, int a, int sp, double r) override {
+		double bestp = -1e20;
+		for (int a2 = 0; a2 < A; a2++) {
+			bestp = max(bestp, Qval(sp, a2));
+		}
+		double target = r + C.gamma * bestp;
+		double pred = Qval(s, a);
+		auto f = phi(s);
+		for (int d = 0; d < D; d++) {
+			w[a][d] += alpha * (target - pred) * f[d];
+		}
+	}
+
+	void decay() override {
+		alpha = max(0.01, alpha * (1 - C.alphaDecay));
+		eps = max(C.epsMin, eps * (1 - C.epsDecay));
+		tau = max(0.01, tau * (1 - C.tauDecay));
+	}
+
+	void save(const string &fn) override {
+		json J;
+		J["w"] = w;
+		ofstream out(fn);
+		out << J.dump(2);
+	}
+
+	void load(const string &fn) override {
+		ifstream in(fn);
+		if (!in) return;
+		json J;
+		try {
+			in >> J;
+			w = J["w"].get<vector<vector<double>>>();
+		} catch (const std::exception &e) {
+			std::cerr << e.what() << '\n';
+		}
+	}
+};
+
+int get_type_id(int &gg) { return 1; }
+double get_type_id(double &gg) { return 0; }
+
+template <typename T>
+T json_number_getter(const json &j, const std::string &key, T asDefault) {
+	if (!j.contains(key) || j[key].is_null() || j[key].empty()) return asDefault;
+	std::string val = j.at(key).get<std::string>();
+	if (!val.size())
+		return asDefault;
+	else if (get_type_id(asDefault))
+		return std::stoi(val);
+	else
+		return std::stod(val);
+}
+
+int json_state_getter(json &js, bool newstate = true) {
+	int r = -1, c = -1;
+	if (newstate) {
+		if (js["newState"]["x"].is_number()) c = js["newState"]["x"];
+		else c = stoi(js["newState"]["x"].get<string>());
+
+		if (js["newState"]["y"].is_number()) r = js["newState"]["y"];
+		else r = stoi(js["newState"]["y"].get<string>());
+	} else {
+		string val = js["state"].get<string>();
+		c = stoi(val);
+		r = stoi(val.substr(val.find(':') + 1));
+	}
+	return idx(r, c, GRID_SIDE);
+}
+
+// –– Main loop ––
+int main() {
+	srand(time(nullptr));
+	string apikey = "";
+	try {
+		std::ifstream file("apikey.txt");
+		std::getline(file, apikey);
+	} catch (const std::exception &e) {
+		std::cerr << e.what() << '\n';
+	}
+
+	vector<string> haeders = {
+		"Content-Type: application/x-www-form-urlencoded",
+		"x-api-key: " + apikey,
+		"userId: 3671"};
+
+	vector<RLConfig> configs(NUM_WORLDS + 1);
+	for (int w = 1; w <= NUM_WORLDS; w++) {
+		RLConfig &c = configs[w];
+		switch (w) {
+		case 1:
+		case 2:
+		case 3:
+		case 4:
+			c.featureQA = false;
+			c.useBoltzmann = false;
+			c.alpha0 = 0.5;
+			c.alphaDecay = 1e-4;
+			c.eps0 = 1.0;
+			c.epsDecay = 0.9995;
+			c.epsMin = 0.1;
+			c.gamma = 0.99;
+			break;
+		case 5:
+		case 6:
+			c.featureQA = false;
+			c.useBoltzmann = true;
+			c.alpha0 = 0.5;
+			c.alphaDecay = 1e-4;
+			c.tau0 = 1.0;
+			c.tauDecay = 1e-4;
+			c.gamma = 0.99;
+			break;
+		case 7:
+		case 8:
+			c.featureQA = true;
+			c.useBoltzmann = false;
+			c.alpha0 = 0.3;
+			c.alphaDecay = 5e-5;
+			c.eps0 = 1.0;
+			c.epsDecay = 0.9998;
+			c.epsMin = 0.1;
+			c.gamma = 0.995;
+			break;
+		case 9:
+		case 10:
+			c.featureQA = true;
+			c.useBoltzmann = true;
+			c.alpha0 = 0.3;
+			c.alphaDecay = 5e-5;
+			c.tau0 = 1.0;
+			c.tauDecay = 5e-5;
+			c.gamma = 0.995;
+			break;
+		case 11:
+			c.featureQA = false;
+			c.useBoltzmann = false;
+			c.alpha0 = 0.7;
+			c.alphaDecay = 2e-4;
+			c.eps0 = 1.0;
+			c.epsDecay = 0.995;
+			c.epsMin = 0.2;
+			c.gamma = 0.95;
+			break;
+		}
+	}
+
+
+	for (int world = START_WORLD; world <= NUM_WORLDS; world++) {
+		// 1) ensure we're in `world` (omitted for brevity, as before)…
+		requestData loc;
+		loc.headers = haeders;
+		loc.url = "https://www.notexponential.com/aip2pgaming/api/rl/gw.php?type=location&teamId=" + to_string(TEAM_ID);
+		json js = json::parse(sender(loc));
+		cout << js.dump() << "\n";
+		int curworld = json_number_getter(js, "world", -1);
+
+		if (curworld != world) {
+			requestData e;
+			e.headers = haeders;
+			e.url = "https://www.notexponential.com/aip2pgaming/api/rl/gw.php";
+			e.postData = "type=enter&worldId=" + to_string(world) + "&teamId=" + to_string(TEAM_ID);
+			cout << sender(e, true) << '\n';
+			js = json::parse(sender(loc));
+			curworld = json_number_getter(js, "world", -1);
+			cout << "entered to: " << js.dump() << "\n";
+		} else if (world != curworld) {
+			cout << "\nerror, current world is " << curworld << " while iteration world is " << world;
+			return 0;
+		}
+
+		// 2) get initial state
+		int state = json_state_getter(js, false);
+
+		// set learner type
+		unique_ptr<QBase> learner;
+		RLConfig &cfg = configs[world];
+		if (cfg.featureQA)
+			learner.reset(new QFeat(S, GRID_SIDE, cfg));
+		else
+			learner.reset(new QTable(S, cfg));
+
+		// load prior state if exists
+		string fn = "world_" + to_string(world) + (cfg.featureQA ? "_feat.json" : "_tab.json");
+		learner->load(fn);
+
+		vector<double> flatQ_prev;
+		bool converged = false;
+		int episode = 0;
+
+		// flatten helper
+		auto flattenQ = [&](QBase &L) -> vector<double> {
+			if (auto *T = dynamic_cast<QTable *>(&L)) {
+				vector<double> v;
+				for (auto &row : T->Q)
+					for (double q : row)
+						v.push_back(q);
+				return v;
+			}
+			if (auto *F = dynamic_cast<QFeat *>(&L)) {
+				vector<double> v;
+				for (auto &wa : F->w)
+					for (double w : wa)
+						v.push_back(w);
+				return v;
+			}
+			return {};
+		};
+
+		// initial snapshot
+		flatQ_prev = flattenQ(*learner);
+		static const vector<string> Acts = {"N", "E", "S", "W"};
+		static const vector<string> Acts2 = {"^", ">", "V", "<"};
+
+		while (!converged && episode < MAX_EPISODES) {
+			// run one full episode of STEPS_PER_EPISODE
+			episode++;
+
+			for (int step = 0; step < STEPS_PER_EPISODE; step++) {
+				auto wait_until = std::chrono::system_clock::now() + std::chrono::seconds(1);
+				int a = learner->choose(state);
+
+				requestData mv;
+				mv.headers = haeders;
+				mv.url = "https://www.notexponential.com/aip2pgaming/api/rl/gw.php";
+				mv.postData = "type=move&teamId=" + to_string(TEAM_ID) + "&worldId=" + to_string(world) + "&move=" + Acts[a];
+
+				json rj = json::parse(sender(mv, true));
+				cout << rj.dump() << " " << Acts2[a] << " " << step << "\n";
+
+				double reward = 0;
+				int nextState = 0;
+				bool worlended = false;
+
+				if (!rj.contains("reward")) {
+					cout << "\nerror. no reward :<\n";
+					return 0;
+				}
+				
+				reward = rj["reward"];
+				if (rj["newState"].is_null()) worlended = true;
+				else nextState = json_state_getter(rj);
+
+				if (worlended) nextState = 0;
+				learner->update(state, a, nextState, reward);
+				learner->decay();
+				state = nextState;
+				learner->save(fn);
+
+				cout << "asleep..";
+				std::this_thread::sleep_until(wait_until);
+				cout << "awake..";
+				if (worlended) break;
+			}
+
+			// 3) every CHECK_INTERVAL episodes, check convergence
+			if (episode % CHECK_INTERVAL == 0) {
+				auto flatQ_now = flattenQ(*learner);
+				double maxDelta = 0;
+				for (int i = 0; i < (int)flatQ_now.size(); ++i) {
+					maxDelta = max(maxDelta, fabs(flatQ_now[i] - flatQ_prev[i]));
+				}
+				if (maxDelta < CONVERGENCE_EPS) {
+					converged = true;
+					cout << "World " << world << " converged at episode " << episode
+						<< " (ΔQ=" << maxDelta << ")\n";
+				} else {
+					flatQ_prev.swap(flatQ_now);
+				}
+			}
+		}
+
+		// 4) Save and prepare for next world
+		learner->save("world_" + to_string(world) + ".json");
+		cout << "Finished learning world " << world << " in " << episode << " episodes.\n";
+	}
+
+	// 5) get final score
+	requestData scoreReq;
+	scoreReq.url = "https://www.notexponential.com/aip2pgaming/api/rl/score.php?type=score&teamId=" + to_string(TEAM_ID);
+	json sj = json::parse(sender(scoreReq));
+	cout << "Total score: " << sj.value("score", 0.0) << "\n";
+	return 0;
+}

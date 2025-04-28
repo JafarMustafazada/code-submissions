@@ -8,9 +8,3 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
 file(GLOB_RECURSE MY_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 add_executable(rl_q_agent ${MY_SOURCES})
-
-# output directories (optional)
-set_target_properties(rl_q_agent PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    OUTPUT_NAME "rl_q_agent"
-)

@@ -1,21 +1,20 @@
+#ifndef JDEVTOOLS_JDEVCURL_HPP
+#define JDEVTOOLS_JDEVCURL_HPP
 
-#include <cstdio>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
+#include <vector>
+#include <stdexcept>
 
-// #include <iostream>
-
-namespace curlcmd {
+namespace {
 #if defined(_WIN32)
 #define popen _popen
 #define pclose _pclose
 #endif
 
-	std::string exec(const char *cmd) {
+	inline std::string exec(const char* cmd) {
 		char buffer[128];
 		std::string result = "";
-		FILE *pipe = popen(cmd, "r");
+		FILE* pipe = popen(cmd, "r");
 		if (!pipe) throw std::runtime_error("popen() failed!");
 		try {
 			while (fgets(buffer, sizeof buffer, pipe) != NULL) {
@@ -28,7 +27,9 @@ namespace curlcmd {
 		pclose(pipe);
 		return result;
 	}
+}
 
+namespace jdevtools {
 	struct requestData {
 		std::string url = "example.com";
 		std::vector<std::string> headers;
@@ -38,8 +39,8 @@ namespace curlcmd {
 		std::vector<std::string> urlEncodeData;
 	};
 
-	std::string sender(requestData &req, bool isPost = false) {
-		std::string command = "curl";
+	inline std::string sender(const requestData &req, bool isPost = false) {
+		std::string command = "curl -s -o -";
 		if (isPost) command += " -X POST \"" + req.url + '"';
 		else command += " --location \"" + req.url + '"';
 		for (int i = 0; i < req.headers.size(); i++) {
@@ -53,3 +54,5 @@ namespace curlcmd {
 		return exec(command.data());
 	}
 }
+
+#endif

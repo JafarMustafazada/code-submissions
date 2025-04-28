@@ -12,7 +12,7 @@ std::string apikey = "";
 void play_inconsole2(playerData &p, int threadCount = 1, int n = 12, int m = 6,
 		bool isalpha = true, int time = 30000, int online = 0, bool startX = false, bool dynamic = false);
 
-void online_make_move(pii &move, std::string gameid) {
+void online_make_move(pii &move, std::string gameid, std::string teamid = "1447") {
 	// type=move&teamId=1447&gameId={gameid}&move={i},{j}
 	curlcmd::requestData req1;
 	req1.headers = {
@@ -20,7 +20,7 @@ void online_make_move(pii &move, std::string gameid) {
 	    "x-api-key: " + apikey,
 	    "userId: 3671"};
 	req1.url = "https://www.notexponential.com/aip2pgaming/api/index.php";
-	req1.postData = "type=move&teamId=1447&gameId=" + gameid + "&move=" + std::to_string(move.i) + ',' + std::to_string(move.j);
+	req1.postData = "type=move&teamId=" + teamid + "&gameId=" + gameid + "&move=" + std::to_string(move.i) + ',' + std::to_string(move.j);
 	std::cout << curlcmd::sender(req1, true) << '\n';
 }
 
@@ -43,32 +43,6 @@ pii online_read_move(std::string gameid, char opp = O) {
 	}
 	return move1;
 }
-
-// void fix_ugly_api(std::string &str1) {
-// 	size_t size1 = str1.size(), count = 0;
-
-// 	std::string str2;
-// 	str2.reserve(size1);
-
-// 	for (int i = 0; i < size1; i++) {
-// 		if (str1[i] == '\\') continue;
-// 		if (str1[i] == '}' && count == 3) {
-// 			count++;
-// 			str2.push_back('}');
-// 			i++;
-// 			continue;
-// 		}
-
-// 		if (str1[i] == '{') count++;
-// 		if (count == 2) {
-// 			str2.pop_back();
-// 			count++;
-// 		}
-// 		str2.push_back(str1[i]);
-// 	}
-
-// 	str1 = str2;
-// }
 
 void online_read_board(playerData &p, std::string gameid, char &current) {
 	// type=boardString&gameId={}
@@ -117,6 +91,7 @@ int main(int argc, char **argv) {
 		std::cout << "-start {1 - start with X instead, useful with -load. default(0)}\n";
 		std::cout << "-dynamic {1 - change depth depending on time limit. default(0)}\n";
 		std::cout << "-online {gameId - for ai making auto request. Disables player input (reads from api). default(0)}\n";
+		std::cout << "-teamid {useful for online. default(1447)}\n";
 		std::cout << "-load {should it load game board from map.txt. default(0)}\n\n";
 		std::cout << "Here is example of map.txt:\n";
 		std::cout << "XX----------\n";
@@ -186,6 +161,7 @@ int main(int argc, char **argv) {
 		try {
 			std::ifstream file("apikey.txt");
 			std::getline(file, apikey);
+			file.close();
 		} catch (const std::exception &e) {
 			std::cerr << e.what() << '\n';
 		}
@@ -235,16 +211,12 @@ void play_inconsole2(playerData &p, int threadCount, int n, int m,
 			// 	std::cin >> move.i >> move.j;
 			// } while (move.i < 0 || move.i >= n || move.j < 0 || move.j >= n || p.B.g[move.i][move.j] != E);
 			std::cout << "AI2 (" << current << ")'s turn...\n";
-			if (threadCount)
-				move = minimaxBestThreading(p2, isalpha, threadCount, time);
-			else
-				move = minimaxBest(p2, isalpha, time);
+			if (threadCount) move = minimaxBestThreading(p2, isalpha, threadCount, time);
+			else move = minimaxBest(p2, isalpha, time);
 		} else {
 			std::cout << "AI (" << current << ")'s turn...\n";
-			if (threadCount)
-				move = minimaxBestThreading(p, isalpha, threadCount, time);
-			else
-				move = minimaxBest(p, isalpha, time);
+			if (threadCount) move = minimaxBestThreading(p, isalpha, threadCount, time);
+			else move = minimaxBest(p, isalpha, time);
 			if (online) online_make_move(move, gameid);
 		}
 
@@ -260,8 +232,9 @@ void play_inconsole2(playerData &p, int threadCount, int n, int m,
 	} while (!istie && !p.B.isMoveWin(move));
 
 	if (p.B.isMoveWin(move)) {
-		std::cout << p.B.g[move.i][move.j] << " is winner\n";
+		std::cout << p.B.g[move.i][move.j] << " is winner.\n";
 	}
+	else std::cout << " game is tie.\n";
 	for (auto &row : p.B.g) {
 		for (auto c : row)
 			std::cout << c << " ";

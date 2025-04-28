@@ -11,7 +11,7 @@ namespace curlcmd {
 	#define popen _popen
 	#define pclose _pclose
 	#endif
-	
+
 	std::string exec(const char* cmd) {
 		char buffer[128];
 		std::string result = "";
