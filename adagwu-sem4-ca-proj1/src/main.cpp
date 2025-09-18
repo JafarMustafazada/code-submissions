@@ -157,7 +157,7 @@ void init(int argc, char **argv) {
 		} else if (args == "-it" && i + 1 < argc) {
 			std::string t = argv[++i];
 			if (t == "crspline" || t == "catmullrom" || t == "0") motion.interpType = InterpType::CatmullRom;
-			else if (t == "bspline" || t == "b-spline" || t == "1") motion.interpType = InterpType::BSpline;
+			else if (t == "bspline" || t == "1") motion.interpType = InterpType::BSpline;
 			else std::cerr << "Unknown interpolation type: " << t << "\n";
 			continue;
 		} else if (args == "-m" && i + 1 < argc) {
@@ -168,7 +168,8 @@ void init(int argc, char **argv) {
 			std::cout << "Options:\n";
 			std::cout << "  -ot <type> Orientation type: quat/quaternion/0 (default), euler/1\n";
 			std::cout << "  -it <type> Interpolation type: crspline/catmullrom/0 (default), bspline/b-spline/1\n";
-			std::cout << "  -m <file>  Load model from .obj file (default: teapot.obj)\n";
+			std::cout << "  -m <file>  File path, loads models with `.obj` extension (default: cube or `teapot.obj` "
+			             "file if in same directory)\n";
 			std::cout << "  -h, --help Show this help message\n";
 			exit(0);
 		} else {
@@ -178,10 +179,7 @@ void init(int argc, char **argv) {
 		}
 	}
 
-	if (!model->load(fn)) {
-		std::cerr << "Failed to load model: " << fn << "\n";
-		exit(1);
-	}
+	model->load(fn);
 	lastTime = std::chrono::steady_clock::now();
 
 	motion.addKey(glm::vec3(0, 0, 0), glm::quat(glm::vec3(0, 0, 0)));

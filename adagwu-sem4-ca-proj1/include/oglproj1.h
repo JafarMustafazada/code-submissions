@@ -42,6 +42,34 @@ void main() {
     FragColor = vec4(ambient + diffuse + specular + materialEmission, 1.0);
 }
 )";
+const char *DEFAULT_OBJ = R"(
+v -1.0 -1.0 -1.0
+v  1.0 -1.0 -1.0
+v  1.0  1.0 -1.0
+v -1.0  1.0 -1.0
+v -1.0 -1.0  1.0
+v  1.0 -1.0  1.0
+v  1.0  1.0  1.0
+v -1.0  1.0  1.0
+vn  0.0  0.0 -1.0
+vn  0.0  0.0  1.0
+vn -1.0  0.0  0.0
+vn  1.0  0.0  0.0
+vn  0.0 -1.0  0.0
+vn  0.0  1.0  0.0
+f 1//1 2//1 3//1
+f 3//1 4//1 1//1
+f 5//2 8//2 7//2
+f 7//2 6//2 5//2
+f 1//3 4//3 8//3
+f 8//3 5//3 1//3
+f 2//4 6//4 7//4
+f 7//4 3//4 2//4
+f 4//5 3//5 7//5
+f 7//5 8//5 4//5
+f 1//6 5//6 6//6
+f 6//6 2//6 1//6
+)";
 
 // Shader class
 struct Shader {
@@ -124,9 +152,9 @@ struct Mesh {
 // Model loader
 struct Model {
 	Mesh mesh;
-	bool load(const std::string &fn) {
-		std::ifstream f(fn);
-		if (!f.is_open()) return false;
+
+	bool loadFromString(const std::string &data) {
+		std::istringstream f(data);
 		std::vector<glm::vec3> v, n;
 		std::vector<unsigned> vi, ni;
 		std::string l;
@@ -174,5 +202,13 @@ struct Model {
 		mesh.setup();
 		return true;
 	}
+
+	bool load(const std::string &fn = "") {
+		std::ifstream f(fn);
+		if (!f.is_open()) return loadFromString(DEFAULT_OBJ);
+		std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		return loadFromString(data);
+	}
+
 	void draw() const { mesh.draw(); }
 };
