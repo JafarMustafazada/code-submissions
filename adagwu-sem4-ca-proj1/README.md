@@ -58,5 +58,6 @@ Here is command options (you don't need library binaries for executable to run).
 
 - -ot <type\> Orientation type: quat/quaternion/0 (default), euler/1
 - -it <type\> Interpolation type: crspline/catmullrom/0 (default), bspline/1
-- -m <file\>  File path, loads models with `.obj` extension (default: cube or `teapot.obj` file if it exist)
-- -h, --help Show this help message
+- -kf <list> Keyframes, format: "x,y,z:e1,e2,e3;..." (Euler angles in degrees)
+- -m <file>  File path, loads models with `.obj` extension (default: cube or `teapot.obj` file if it exist)
+- -h, --help Show this help message\n";
