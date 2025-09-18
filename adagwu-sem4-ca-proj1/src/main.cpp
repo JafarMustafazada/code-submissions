@@ -138,12 +138,43 @@ glm::mat4 modelMat = glm::mat4(1.0f);
 MotionController motion;
 float motionTime = 0;
 
-// middleware :P
+// Helper to parse keyframe string format: "x,y,z:e1,e2,e3" (dont forget, only Euler angles in degrees!)
+void parseKeyframe(const std::string &str, MotionController &motion, OrientationType orientType) {
+	size_t pos = str.find(':');
+	if (pos == std::string::npos) return;
+	std::string posStr = str.substr(0, pos);
+	std::string orientStr = str.substr(pos + 1);
+
+	glm::vec3 position(0);
+	glm::vec3 euler(0);
+
+	// Parse position
+	std::stringstream ss(posStr);
+	for (int i = 0; i < 3; ++i) {
+		std::string val;
+		if (!std::getline(ss, val, ',')) break;
+		position[i] = std::stof(val);
+	}
+
+	// Parse orientation
+	std::stringstream ss2(orientStr);
+	for (int i = 0; i < 3; ++i) {
+		std::string val;
+		if (!std::getline(ss2, val, ',')) break;
+		euler[i] = glm::radians(std::stof(val));
+	}
+
+	if (orientType == OrientationType::Quaternion) motion.addKey(position, glm::quat(euler));
+	else motion.addKey(position, euler);
+}
+
 void init(int argc, char **argv) {
 	shader = std::make_unique<Shader>(vsSrc, fsSrc);
 	model = std::make_unique<Model>();
 	std::string fn = "teapot.obj";
 	glClearDepth(1.0f);
+
+	std::vector<std::string> keyframeInputs;
 
 	// Processing command line arguments
 	for (int i = 1; i < argc; i++) {
@@ -163,13 +194,21 @@ void init(int argc, char **argv) {
 		} else if (args == "-m" && i + 1 < argc) {
 			fn = argv[++i];
 			continue;
+		} else if (args == "-kf" && i + 1 < argc) {
+			std::string kfs = argv[++i];
+			std::stringstream ss(kfs);
+			std::string kf;
+			while (std::getline(ss, kf, ';')) {
+				if (!kf.empty()) keyframeInputs.push_back(kf);
+			}
+			continue;
 		} else if (args == "-h" || args == "--help") {
 			std::cout << "Usage: oglproj1 [options]\n";
 			std::cout << "Options:\n";
 			std::cout << "  -ot <type> Orientation type: quat/quaternion/0 (default), euler/1\n";
 			std::cout << "  -it <type> Interpolation type: crspline/catmullrom/0 (default), bspline/b-spline/1\n";
-			std::cout << "  -m <file>  File path, loads models with `.obj` extension (default: cube or `teapot.obj` "
-			             "file if in same directory)\n";
+			std::cout << "  -m <file>  File path, loads models with `.obj` extension (default: cube or `teapot.obj` file)\n";
+			std::cout << "  -kf <list> Keyframes, format: \"x,y,z:e1,e2,e3;...\" (Euler angles in degrees)\n";
 			std::cout << "  -h, --help Show this help message\n";
 			exit(0);
 		} else {
@@ -179,13 +218,18 @@ void init(int argc, char **argv) {
 		}
 	}
 
-	model->load(fn);
 	lastTime = std::chrono::steady_clock::now();
+	model->load(fn);
 
-	motion.addKey(glm::vec3(0, 0, 0), glm::quat(glm::vec3(0, 0, 0)));
-	motion.addKey(glm::vec3(2, 0, 0), glm::quat(glm::vec3(0, glm::radians(90.0f), 0)));
-	motion.addKey(glm::vec3(2, 2, 0), glm::quat(glm::vec3(glm::radians(90.0f), glm::radians(90.0f), 0)));
-	motion.addKey(glm::vec3(0, 2, 0), glm::quat(glm::vec3(glm::radians(180.0f), 0, 0)));
+	if (!keyframeInputs.empty()) {
+		for (const auto &kf : keyframeInputs) parseKeyframe(kf, motion, motion.orientType);
+	} else {
+		// Default keyframes
+		motion.addKey(glm::vec3(0, 0, 0), glm::quat(glm::vec3(0, 0, 0)));
+		motion.addKey(glm::vec3(2, 0, 0), glm::quat(glm::vec3(0, glm::radians(90.0f), 0)));
+		motion.addKey(glm::vec3(2, 2, 0), glm::quat(glm::vec3(glm::radians(90.0f), glm::radians(90.0f), 0)));
+		motion.addKey(glm::vec3(0, 2, 0), glm::quat(glm::vec3(glm::radians(180.0f), 0, 0)));
+	}
 }
 
 // animation happens here

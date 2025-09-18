@@ -19,4 +19,7 @@ AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortBlocksOnASingleLine: true
 AllowShortFunctionsOnASingleLine: All
 
-ColumnLimit: 120
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+
+ColumnLimit: 140
